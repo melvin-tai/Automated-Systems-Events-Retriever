@@ -2,14 +2,28 @@
  MANUAL CONFIGURATION(S)
 ***********************/
 const CONFIG = {
+
+  // Align Sheet Tabs and Subscriptable Calendars.
   sheets: {
-    PhotoCompEvents: 'PhotoComps',
-    HackCompEvents: 'Hackathons',
+
+    // Sample Template:
+    // SheetTab     : "CalendarName",
+    PhotoCompEvents : "PhotoComps",
+    HackCompEvents  : "Hackathons",
   },
+
+  // Ensure total entries of "maxRows" rows by duplicating entry at row "templateRow".
   maxRows: 1000,
   templateRow: 900,
+
+  // Clean-up entry from Google Sheets after "cleanupDays" days.
+  // Note: Event will NOT be deleted from Google Calendar after clean-up.
   cleanupDays: 3,
+
+  // If "assumeEventStartsOnSync" is true, event startDate is set to the day it was synced;
+  // If "assumeEventStartsOnSync" is true, event startDate is set to assumeEventLengthDays days before endDate.
   assumeEventLengthDays: 2,
+  assumeEventStartsOnSync: false,
 };
 
 /***********************
@@ -44,16 +58,16 @@ function syncSheetToCalendar(sheet, calendar) {
     const row = data[i];
 
     const [
-      website,     // A
-      name,        // B
-      startDate,   // C
-      endDate,     // D
-      url,         // E
-      ,            // F LastUpdated (Column F)
-      eventId,     // G
-      status,      // H
-      priority,    // I
-      delFlag,     // J
+      website,   // A
+      name,      // B
+      startDate, // C
+      endDate,   // D
+      url,       // E
+      ,          // F LastUpdated (Column F)
+      eventId,   // G
+      status,    // H
+      priority,  // I
+      delFlag,   // J
     ] = row;
 
     /* =========================
@@ -75,11 +89,11 @@ function syncSheetToCalendar(sheet, calendar) {
     if (!website || !name || !endDate) continue;
 
     const end = stripTime(new Date(endDate));
-    const start = startDate
-      ? stripTime(new Date(startDate))
-      : new Date(end.getTime() - CONFIG.assumeEventLengthDays * 86400000);
-
     if (end < today) continue;
+
+    let start = startDate
+      ? stripTime(new Date(startDate))
+      : null;
 
     const title = `[${website}] ${name}`;
     const description = url ? `Source: ${url}` : '';
@@ -87,12 +101,18 @@ function syncSheetToCalendar(sheet, calendar) {
     let isNewEvent = false;
 
     /* =========================
-       CREATE / UPDATE EVENT
+       UPDATE EXISTING EVENT
        ========================= */
     if (eventId) {
       try {
         event = calendar.getEventById(eventId);
         if (event) {
+          if (!start) {
+            start = new Date(
+              end.getTime() - CONFIG.assumeEventLengthDays * 86400000
+            );
+          }
+
           event.setTitle(title);
           event.setDescription(description);
           event.setAllDayDates(start, new Date(end.getTime() + 86400000));
@@ -102,13 +122,28 @@ function syncSheetToCalendar(sheet, calendar) {
       }
     }
 
+    /* =========================
+       CREATE NEW EVENT
+       ========================= */
     if (!event) {
+      if (!start) {
+        start = CONFIG.assumeEventStartsOnSync
+          ? today
+          : new Date(
+              end.getTime() -
+              CONFIG.assumeEventLengthDays * 86400000
+            );
+
+        sheet.getRange(i + 1, 3).setValue(start);
+      }
+
       event = calendar.createAllDayEvent(
         title,
         start,
         new Date(end.getTime() + 86400000),
         { description }
       );
+
       sheet.getRange(i + 1, 7).setValue(event.getId());
       isNewEvent = true;
     }
@@ -168,8 +203,8 @@ function sortByNearestDate(sheet) {
 }
 
 /***********************
- ROW COUNT ENFORCER - ENSURE ROW COUNT ALWAYS 1000;
- IF OTHERWISE: DUPLICATE templateRow UNTIL maxRows = 1000.
+ ROW COUNT ENFORCER - ENSURE ROW COUNT ALWAYS maxRows;
+ OTHERWISE: DUPLICATE templateRow UNTIL NUMBER OF ROWS = maxRows.
 ***********************/
 function enforceRowCount(sheet) {
   const currentRows = sheet.getLastRow();
